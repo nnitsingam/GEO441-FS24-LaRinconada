@@ -1,0 +1,509 @@
+---
+title: "Landcover_Analysis"
+output: html_document
+date: "2024-04-11"
+---
+
+
+```{r load libraries}
+library(tiff)
+library(raster)
+library(ggplot2)
+library(tidyr)
+library(tmap)
+```
+
+
+```{r load data, fig.dim = c(12, 8)}
+
+raster_file <- stack("data/outputs/landsat_2001_LC_RF.tif")
+
+
+ls_class <- raster_file$landsat_2001_LC_RF_8
+
+res(ls_class)
+
+mapview::mapview(ls_class)
+
+# Classes: 
+# 1: Barren Land
+# 2: Bare Rock
+# 3: Vegetation
+# 4: Mining Area (Land)
+# 5: Mining Area (Water)
+# 6: Urban Area
+# 7: Water
+# 8: Snow
+
+
+```
+
+```{r}
+
+# Prepare DF to store pixel counts
+count_aggregate <- data.frame(
+  year = numeric(),
+  mining_land_count = numeric(),
+  mining_water_count = numeric(),
+  urban_count = numeric(),
+  stringsAsFactors = FALSE
+)
+
+```
+
+
+```{r}
+
+# Analysis of old data
+# Create List of raster file names
+years <- seq(1999,2023)
+raster_files <- list()
+
+for (year in years) {
+  file_name <- paste("landsat_",year,"_LC_RF", sep = "")
+  raster_files <- rbind(raster_files, file_name)
+}
+
+raster_files <- as.list(raster_files)
+
+
+# Loop through each raster file
+for (file in raster_files) {
+  
+  # Extract year from file name
+  year <- as.numeric(substring(file, 9, 12))
+  
+  # Read the raster stack
+  #raster_file <- stack(paste("data/",file, ".tif", sep = ""))
+  raster_file <- stack(paste("data/outputs/",file, ".tif", sep = ""))
+  
+  # Extract class
+  #ls_class <- raster_file[[7]]
+  ls_class <- raster_file[[8]]
+  
+  # Extract Classification layer
+  ls_points <- as.data.frame(rasterToPoints(ls_class))
+
+  # Rename column
+  names(ls_points)[3] <- "indices"
+
+  
+  # Create seperate objects for each class
+  ls_barren_land <- ls_points |>
+  filter(indices == 1)
+  
+  ls_bare_rock <- ls_points |>
+  filter(indices == 2)
+  
+  ls_vegetation <- ls_points |>
+  filter(indices == 3)
+  
+
+  ls_mining_land <- ls_points |>
+  filter(indices == 4)
+  
+  ls_mining_water <- ls_points |>
+  filter(indices == 5)
+
+  ls_urban <- ls_points |>
+  filter(indices == 6)
+  
+  ls_water <- ls_points |>
+  filter(indices == 7)
+  
+  ls_snow <- ls_points |>
+  filter(indices == 8)
+  
+  ls_na <- ls_points |>
+  filter(indices == 9)
+    
+  # Count Pixels 
+  baren_land_count <- nrow(ls_barren_land)
+  bare_rock_count <- nrow(ls_bare_rock)
+  vegetation_count <- nrow(ls_vegetation)
+  urban_count <- nrow(ls_urban)
+  mining_land_count <- nrow(ls_mining_land)
+  mining_water_count <- nrow(ls_mining_water)
+  water_count <- nrow(ls_water)
+  snow_count <- nrow(ls_snow)
+  na_count <- nrow(ls_na)
+  
+  # Store counts in count_aggregate data frame
+  count_aggregate <- rbind(count_aggregate, data.frame(year = year, 
+                                                       baren_land_count = baren_land_count,
+                                                       bare_rock_count = bare_rock_count,
+                                                       vegetation_count = vegetation_count,
+                                                       mining_land_count = mining_land_count, 
+                                                       mining_water_count = mining_water_count, 
+                                                       urban_count = urban_count,
+                                                       water_count = water_count,
+                                                       snow_count = snow_count,
+                                                       na_count = na_count))
+
+}
+
+```
+
+```{r convert pixel count}
+
+# Resolution = 30x30m -> 1 pixel = 900m^2
+count_aggregate <- count_aggregate |>
+  mutate(baren_land_count = baren_land_count * 900 * 10^-6,
+        bare_rock_count = bare_rock_count * 900 * 10^-6,
+        vegetation_count = vegetation_count * 900 * 10^-6,
+        mining_land_count = mining_land_count * 900 * 10^-6,
+        mining_water_count = mining_water_count * 900 * 10^-6,
+        urban_count = urban_count * 900 * 10^-6,
+        water_count = water_count * 900 * 10^-6,
+        snow_count = snow_count * 900 * 10^-6,
+        na_count = na_count * 900 * 10^-6)
+  
+
+# Plotting a boxplot
+boxplot(count_aggregate$mining_land_count, main = "Boxplot for Mining Land Count")
+boxplot(count_aggregate$mining_water_count, main = "Boxplot for Mining Water Count")
+boxplot(count_aggregate$urban_count, main = "Boxplot for Urban Count")
+```
+
+
+```{r}
+
+# Function to remove outliers based on IQR method
+remove_outliers <- function(df, columns) {
+  for (col in columns) {
+    Q1 <- quantile(df[[col]], 0.25)
+    Q3 <- quantile(df[[col]], 0.75)
+    IQR <- Q3 - Q1
+    lower_bound <- Q1 - 1.5 * IQR
+    upper_bound <- Q3 + 1.5 * IQR
+    df <- df[df[[col]] >= lower_bound & df[[col]] <= upper_bound, ]
+  }
+  return(df)
+}
+
+# Specify the columns to check for outliers
+count_columns <- c("baren_land_count", "bare_rock_count", "vegetation_count", 
+                   "mining_land_count", "mining_water_count", "urban_count",
+                   "water_count", "snow_count", "na_count")
+
+# Remove outliers
+count_aggregate <- remove_outliers(count_aggregate, count_columns)
+
+
+# Print the updated data frame
+print(unique(count_aggregate$year))
+
+#removed years: 2002, 2007, 2012, 2014, 2015, 2018
+
+```
+
+
+```{r}
+
+# Your data and plot code
+time_series_plot <- ggplot(count_aggregate) +
+  geom_line(aes(x = year, y = mining_land_count, color = "Mining (Land)"), linetype = "solid", size = 1) +
+  geom_smooth(aes(x = year, y = mining_land_count, color = "Mining (Land)"), 
+              method = "lm", se = FALSE, lwd = 0.8, linetype = "dotted") +  
+  geom_line(aes(x = year, y = mining_water_count, color = "Mining (Water)"), linetype = "solid", size = 1) +
+  geom_smooth(aes(x = year, y = mining_water_count, color = "Mining (Water)"), 
+              method = "lm", se = FALSE, lwd = 0.8, linetype = "dotted") +  
+  geom_line(aes(x = year, y = urban_count, color = "Urban"), linetype = "solid", size = 1) +
+  geom_smooth(aes(x = year, y = urban_count, color = "Urban"), 
+              method = "lm", se = FALSE, lwd = 0.8, linetype = "dotted") +  
+  scale_color_manual(name = "", values = c("Mining (Land)" = "#ba7bde", "Mining (Water)" = "#ffaa00", "Urban" = "#e6879f")) +
+  xlab("Year") +
+  scale_x_continuous(breaks = years[seq(1, length(years), by = 2)]) +
+  ylab("Area [km²]") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 0.5),
+    text = element_text(size = 16),            # Increase base text size
+    plot.title = element_text(size = 20),      # Increase title size
+    axis.title = element_text(size = 16),      # Increase axis titles size
+    axis.text = element_text(size = 14),       # Increase axis text size
+    legend.title = element_blank(),            # Remove legend title
+    legend.text = element_text(size = 14),     # Increase legend text size    
+    panel.grid.minor = element_blank(),        # Remove minor grid lines
+    axis.title.y = element_text(margin = margin(r = 10))  # Add margin to y-axis title
+  )
+plot
+
+# Save the plot
+ggsave("data/outputs/plots/mining_urban_time_series_plot.png", time_series_plot, width = 10, height = 6, units = "in", dpi = 300)
+
+```
+
+```{r}
+
+# 1: Barren Land #dedede
+# 2: Bare Rock #8e9391
+# 3: Vegetation #91d474
+# 4: Mining Area (Land) #ba7bde
+# 5: Mining Area (Water) #ffaa00
+# 6: Urban Area #e6879f
+# 7: Water #acf9ff
+# 8: Snow #f4f1f6
+
+# Your data and plot code
+all_classes_time_series_plot <- ggplot(count_aggregate) +
+  geom_line(aes(x = year, y = baren_land_count, color = "Baren Land"), linetype = "solid", size = 1) +
+  geom_line(aes(x = year, y = bare_rock_count, color = "Bare Rock"), linetype = "solid", size = 1) +
+  geom_line(aes(x = year, y = vegetation_count, color = "Vegetation"), linetype = "solid", size = 1) +
+  geom_line(aes(x = year, y = mining_land_count, color = "Mining (Land)"), linetype = "solid", size = 1) +
+  geom_line(aes(x = year, y = mining_water_count, color = "Mining (Water)"), linetype = "solid", size = 1) +
+  geom_line(aes(x = year, y = urban_count, color = "Urban"), linetype = "solid", size = 1) +
+  geom_line(aes(x = year, y = water_count, color = "Water"), linetype = "solid", size = 1) +
+  geom_line(aes(x = year, y = snow_count, color = "Snow"), linetype = "solid", size = 1) +
+  geom_line(aes(x = year, y = na_count, color = "NA"), linetype = "solid", size = 1) +
+  scale_color_manual(values = c("Baren Land" = "#dedede",
+                                "Bare Rock" = "#8e9391",
+                                "Vegeation" = "#91d474",
+                                "Mining (Land)" = "#ba7bde", 
+                                "Mining (Water)" = "#ffaa00", 
+                                "Urban" = "#e6879f",
+                                "Water" = "#acf9ff",
+                                "Snow" = "#f4f1f6",
+                                "NA" = "#000000")) +
+  labs(color = "") +
+  xlab("Year") +
+  ylab("Area [km²]") +
+  theme_minimal() +
+  theme(
+    text = element_text(size = 16),            # Increase base text size
+    plot.title = element_text(size = 20),      # Increase title size
+    axis.title = element_text(size = 18),      # Increase axis titles size
+    axis.text = element_text(size = 14),       # Increase axis text size
+    legend.title = element_text(size = 16),    # Increase legend title size
+    legend.text = element_text(size = 14)      # Increase legend text size
+  )
+
+plot(all_classes_time_series_plot)
+
+# Save the plot
+ggsave("data/outputs/plots/all_classes_time_series_plot.png", all_classes_time_series_plot, width = 10, height = 6, units = "in", dpi = 300)
+```
+
+```{r}
+
+
+
+# Assuming your dataframe is named 'df'
+reformatted_df <- count_aggregate %>%
+  pivot_longer(cols = -year, names_to = "group", values_to = "count")
+
+# Define the colors based on the codes provided
+colors <- c("baren_land_count" = "#dedede",
+            "bare_rock_count" = "#8e9391",
+            "vegetation_count" = "#91d474",
+            "mining_land_count" = "#ba7bde",
+            "mining_water_count" = "#ffaa00",
+            "urban_count" = "#e6879f",
+            "water_count" = "#acf9ff",
+            "snow_count" = "#f4f1f6",
+            "na_count" = "#000000")
+
+# Define the formatted group names
+formatted_names <- c("Barren Land",
+                     "Bare Rock",
+                     "Vegetation",
+                     "Mining Area (Land)",
+                     "Mining Area (Water)",
+                     "Urban Area",
+                     "Water",
+                     "Snow",
+                     "NA")
+
+reformatted_df$group <- factor(reformatted_df$group, levels = c("baren_land_count", "bare_rock_count", "vegetation_count", "mining_land_count", "mining_water_count", "urban_count", "water_count", "snow_count", "na_count"))
+
+stack_plot <- ggplot(reformatted_df, aes(x = year, y = as.double(count), fill = group)) +
+  geom_area() +
+  scale_fill_manual(values = colors, labels = formatted_names) +  # Apply the colors and formatted names
+  labs(fill = "") +
+  xlab("Year") +
+  scale_x_continuous(breaks = years[seq(1, length(years), by = 2)]) +
+  ylab("Area [km²]") +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 0.5),
+    text = element_text(size = 16),            # Increase base text size
+    plot.title = element_text(size = 20),      # Increase title size
+    axis.title = element_text(size = 16),      # Increase axis titles size
+    axis.text = element_text(size = 14),       # Increase axis text size
+    legend.title = element_text(size = 16),    # Increase legend title size
+    legend.text = element_text(size = 14),     # Increase legend text size    
+    panel.grid.minor = element_blank(),        # Remove minor grid lines
+    axis.title.y = element_text(margin = margin(r = 10))  # Add margin to y-axis title
+  )
+
+# Save the plot
+ggsave("data/outputs/plots/stacked_plot_all_classes.png", stack_plot, width = 10, height = 6, units = "in", dpi = 300) 
+
+stack_plot
+
+```
+
+```{r}
+count_aggregate_wo_year <- count_aggregate[,-1]
+count_aggregate_filtered <- count_aggregate_wo_year |>
+  select(mining_land_count,mining_water_count,urban_count)
+
+correlation_matrix <- cor(count_aggregate_filtered)
+print(correlation_matrix)
+```
+```{r}
+count_aggregate_filtered1 <- count_aggregate |>
+  filter(year %in% c(2019, 2020, 2021, 2022, 2023)) |>
+  select(!year)
+
+column_averages <- count_aggregate_filtered %>%
+  summarise(across(.cols = everything(), .fns = mean))
+
+# Step 2: Calculate the total count across all columns
+total_count <- sum(unlist(column_averages))
+
+# Step 3: Calculate the percentage each column's count takes of the total counts
+column_percentages <- column_averages %>%
+  mutate(across(.cols = everything(), .fns = function(x) (x / total_count) * 100))
+
+# View the resulting dataframe
+tibble(round(column_percentages,2))
+
+
+```
+```{r}
+count_aggregate_filtered2 <- count_aggregate |>
+  filter(year %in% c(1999, 2000, 2001, 2002, 2003)) |>
+  select(!year)
+
+column_averages <- count_aggregate_filtered2 %>%
+  summarise(across(.cols = everything(), .fns = mean))
+
+# Step 2: Calculate the total count across all columns
+total_count <- sum(unlist(column_averages))
+
+# Step 3: Calculate the percentage each column's count takes of the total counts
+column_percentages <- column_averages %>%
+  mutate(across(.cols = everything(), .fns = function(x) (x / total_count) * 100))
+
+# View the resulting dataframe
+print(round(column_percentages,2))
+```
+
+```{r}
+# Plotting a boxplot
+boxplot(count_aggregate$mining_land_count, main = "Boxplot for Mining Land Count")
+boxplot(count_aggregate$mining_water_count, main = "Boxplot for Mining Water Count")
+boxplot(count_aggregate$urban_count, main = "Boxplot for Urban Count")
+
+```
+
+
+```{r}
+
+# ndvi im csv: 0, 1, 2, 3, 4, 5, 6, 7, 8
+# ndvi in abb.: 0,1,2,3,4,10,11,12,13
+
+
+ndvi <- read.csv("data/ndvi_p_t.csv") |>
+  na.omit()
+
+ggplot(data = ndvi) + 
+  geom_line(aes(x = year, y = ndvi_max_0))
+
+ggplot(data = ndvi) +
+  geom_line(aes(x = year, y = p))
+
+ggplot(data = ndvi) +
+  geom_line(aes(x = year, y = t))
+
+```
+
+
+```{r link data}
+
+ndvi_link <- ndvi |> left_join(count_aggregate, by = "year") |>
+  na.omit()
+
+ndvi_link <- ndvi_link %>%
+  mutate(ndvi_1 = rowMeans(select(., ndvi_max_0, ndvi_max_1)),
+         ndvi_2 = rowMeans(select(., ndvi_max_2, ndvi_max_3, ndvi_max_4)),
+         ndvi_3 = rowMeans(select(., ndvi_max_5, ndvi_max_6, ndvi_max_7, ndvi_max_8)))
+
+model_mining_area <- lm(ndvi_1 ~ t + p + mining_land_count, data = ndvi_link)
+model_lake_area <- lm(ndvi_1 ~ t + p + mining_land_count, data = ndvi_link)
+model_outflow <- lm(ndvi_1 ~ t + p + mining_land_count, data = ndvi_link)
+
+
+```
+
+```{r}
+# Summary of the models
+summary(model_mining_area)
+```
+
+```{r}
+summary(model_lake_area )
+```
+
+```{r}
+summary(model_outflow)
+```
+
+
+```{r}
+par(mfrow=c(2,2))
+plot(model_outflow)
+```
+
+```{r}
+
+ggplot(data = ndvi_link) +
+  geom_point(aes(x = ndvi_max_1, y = mining_land_count, color = year)) +
+  geom_point(aes(x = ndvi_max_2, y = mining_land_count, color = year)) +
+  geom_point(aes(x = ndvi_max_3, y = mining_land_count, color = year)) +
+  geom_point(aes(x = ndvi_max_4, y = mining_land_count, color = year)) +
+  geom_point(aes(x = ndvi_max_5, y = mining_land_count, color = year)) +
+  geom_point(aes(x = ndvi_max_6, y = mining_land_count, color = year)) +
+  geom_point(aes(x = ndvi_max_7, y = mining_land_count, color = year)) +
+  geom_point(aes(x = ndvi_max_8, y = mining_land_count, color = year)) + 
+  theme_minimal()
+  
+```
+
+```{r}
+
+# Gold Price to mining land model
+# Note this was not included because no free dataset was available. 
+# The goldprice.csv was created using ChatGPT 4 and therefore the data is not verifiable. 
+# However, a manual check showed that the data is similar to other gold price evolution plots. 
+
+goldprice <- read.csv("data/goldprice.csv", sep = ";") |>
+  rename(year = Year,
+         goldprice = `Gold.Price..per.kilogram.in.USD.`) # gold price ins USD per kg
+
+count_aggregate_gold <- count_aggregate |>
+  left_join(goldprice, by = "year")
+
+
+ggplot(count_aggregate_gold) +
+  geom_line(aes(y = mining_land_count, x = year)) +
+  geom_point(aes(y = mining_land_count, x = year)) +
+  geom_line(aes(y = goldprice, x = year)) +
+  geom_point(aes(y = goldprice, x = year)) +
+  labs(x = "Mining Land Count", y = "Gold Price (per kilogram in USD)") +
+  ggtitle("Scatter plot of Mining Land Count vs Gold Price")
+
+# Fit a linear regression model
+model <- lm(mining_land_count ~  goldprice, data = count_aggregate_gold)
+
+# Print the summary of the model
+summary(model)
+
+ggplot(count_aggregate_gold) +
+  geom_line(aes(y = mining_land_count, x = year)) +
+  geom_point(aes(y = mining_land_count, x = year)) 
+```
+
+
+
