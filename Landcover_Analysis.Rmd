@@ -4,25 +4,33 @@ output: html_document
 date: "2024-04-11"
 ---
 
+# 0. Libraries
 
 ```{r load libraries}
+
 library(tiff)
 library(raster)
 library(ggplot2)
 library(tidyr)
+library(dplyr)
 library(tmap)
+
 ```
 
+# 1. Load Data
 
 ```{r load data, fig.dim = c(12, 8)}
 
+# Import one file to show data structure
 raster_file <- stack("data/outputs/landsat_2001_LC_RF.tif")
 
-
+# acces classifciation layer
 ls_class <- raster_file$landsat_2001_LC_RF_8
 
+# show resolution
 res(ls_class)
 
+# visualize classification to verify data
 mapview::mapview(ls_class)
 
 # Classes: 
@@ -38,6 +46,10 @@ mapview::mapview(ls_class)
 
 ```
 
+# 2. Count Class Area Size
+
+## 2.1 Prepare data structure
+
 ```{r}
 
 # Prepare DF to store pixel counts
@@ -51,6 +63,7 @@ count_aggregate <- data.frame(
 
 ```
 
+## 2.2 Count Pixels 
 
 ```{r}
 
@@ -144,6 +157,8 @@ for (file in raster_files) {
 
 ```
 
+## 2.3 Convert pixel count to area
+
 ```{r convert pixel count}
 
 # Resolution = 30x30m -> 1 pixel = 900m^2
@@ -158,13 +173,29 @@ count_aggregate <- count_aggregate |>
         snow_count = snow_count * 900 * 10^-6,
         na_count = na_count * 900 * 10^-6)
   
-
-# Plotting a boxplot
-boxplot(count_aggregate$mining_land_count, main = "Boxplot for Mining Land Count")
-boxplot(count_aggregate$mining_water_count, main = "Boxplot for Mining Water Count")
-boxplot(count_aggregate$urban_count, main = "Boxplot for Urban Count")
 ```
 
+# 3. Outlier detection
+
+## 3.1 Boxplots for outlier visualisation
+
+```{r, fig.width = 12, fig.height = 12}
+# Set up the plotting area for a 3x3 grid
+par(mfrow = c(3, 3))
+
+# Plotting boxplots
+boxplot(count_aggregate$mining_land_count, main = "Boxplot for Mining Land Count",ylab = "Area [km^2]", color = year)
+boxplot(count_aggregate$mining_water_count, main = "Boxplot for Mining Water Count",ylab = "Area [km^2]",color = year)
+boxplot(count_aggregate$urban_count, main = "Boxplot for Urban Count",ylab = "Area [km^2]",color = year)
+boxplot(count_aggregate$baren_land_count, main = "Boxplot for Baren Land",ylab = "Area [km^2],",color = year)
+boxplot(count_aggregate$bare_rock_count, main = "Boxplot for Bare Rock Count",ylab = "Area [km^2]",color = year)
+boxplot(count_aggregate$water_count, main = "Boxplot for Water Count",ylab = "Area [km^2]",color = year)
+boxplot(count_aggregate$snow_count, main = "Boxplot for Snow Count",ylab = "Area [km^2]",color = year)
+boxplot(count_aggregate$vegetation_count, main = "Boxplot for Vegetation Count", ylab = "Area [km^2]",color = year)
+boxplot(count_aggregate$na_count, main = "Boxplot for NA Count",ylab = "Area [km^2]",color = year)
+```
+
+## 3.2 Outlier Removal using IQR (Inter Quartile Range)
 
 ```{r}
 
@@ -190,13 +221,34 @@ count_columns <- c("baren_land_count", "bare_rock_count", "vegetation_count",
 count_aggregate <- remove_outliers(count_aggregate, count_columns)
 
 
-# Print the updated data frame
+# Print the years in the updated data frame
 print(unique(count_aggregate$year))
 
 #removed years: 2002, 2007, 2012, 2014, 2015, 2018
 
 ```
 
+
+## 3.3 Boxplots after outlier removal
+
+```{r, fig.width = 12, fig.height = 12}
+# Set up the plotting area for a 3x3 grid
+par(mfrow = c(3, 3))
+
+# Plotting boxplot to verify removal of outliers
+boxplot(count_aggregate$mining_land_count, main = "Boxplot for Mining Land Count",ylab = "Area [km^2]")
+boxplot(count_aggregate$mining_water_count, main = "Boxplot for Mining Water Count",ylab = "Area [km^2]")
+boxplot(count_aggregate$urban_count, main = "Boxplot for Urban Count",ylab = "Area [km^2]")
+boxplot(count_aggregate$baren_land_count, main = "Boxplot for Baren Land",ylab = "Area [km^2]")
+boxplot(count_aggregate$bare_rock_count, main = "Boxplot for Bare Rock Count",ylab = "Area [km^2]")
+boxplot(count_aggregate$water_count, main = "Boxplot for Water Count",ylab = "Area [km^2]")
+boxplot(count_aggregate$snow_count, main = "Boxplot for Snow Count",ylab = "Area [km^2]")
+boxplot(count_aggregate$vegetation_count, main = "Boxplot for Vegetation Count", ylab = "Area [km^2]")
+boxplot(count_aggregate$na_count, main = "Boxplot for NA Count",ylab = "Area [km^2]")
+
+```
+
+# 4. Visualisations
 
 ```{r}
 
@@ -286,10 +338,8 @@ ggsave("data/outputs/plots/all_classes_time_series_plot.png", all_classes_time_s
 
 ```{r}
 
-
-
-# Assuming your dataframe is named 'df'
-reformatted_df <- count_aggregate %>%
+# pivot df for stacked plot
+reformatted_df <- count_aggregate |>
   pivot_longer(cols = -year, names_to = "group", values_to = "count")
 
 # Define the colors based on the codes provided
@@ -342,6 +392,7 @@ ggsave("data/outputs/plots/stacked_plot_all_classes.png", stack_plot, width = 10
 stack_plot
 
 ```
+# 5. Model Building
 
 ```{r}
 count_aggregate_wo_year <- count_aggregate[,-1]
@@ -389,47 +440,43 @@ column_percentages <- column_averages %>%
 # View the resulting dataframe
 print(round(column_percentages,2))
 ```
-
-```{r}
-# Plotting a boxplot
-boxplot(count_aggregate$mining_land_count, main = "Boxplot for Mining Land Count")
-boxplot(count_aggregate$mining_water_count, main = "Boxplot for Mining Water Count")
-boxplot(count_aggregate$urban_count, main = "Boxplot for Urban Count")
-
-```
-
+# 5.1 NDVI Analysis
 
 ```{r}
 
-# ndvi im csv: 0, 1, 2, 3, 4, 5, 6, 7, 8
-# ndvi in abb.: 0,1,2,3,4,10,11,12,13
-
-
-ndvi <- read.csv("data/ndvi_p_t.csv") |>
+# Read NDVI DATA
+ndvi <- read.csv("data/auxilliary_data/ndvi_p_t.csv") |>
   na.omit()
 
+# Quick Visualisation of data
 ggplot(data = ndvi) + 
-  geom_line(aes(x = year, y = ndvi_max_0))
+  geom_line(aes(x = year, y = ndvi_max_0)) +
+  ggtitle("NDVI for plot 1")
 
 ggplot(data = ndvi) +
-  geom_line(aes(x = year, y = p))
+  geom_line(aes(x = year, y = p)) +
+  ggtitle("Precipitation Data")
 
 ggplot(data = ndvi) +
-  geom_line(aes(x = year, y = t))
+  geom_line(aes(x = year, y = t)) +
+  ggtitle("Temperature Data")
 
 ```
 
 
 ```{r link data}
 
+# Join with land cover areas
 ndvi_link <- ndvi |> left_join(count_aggregate, by = "year") |>
   na.omit()
 
+# Prepare mean values of patches per site
 ndvi_link <- ndvi_link %>%
   mutate(ndvi_1 = rowMeans(select(., ndvi_max_0, ndvi_max_1)),
          ndvi_2 = rowMeans(select(., ndvi_max_2, ndvi_max_3, ndvi_max_4)),
          ndvi_3 = rowMeans(select(., ndvi_max_5, ndvi_max_6, ndvi_max_7, ndvi_max_8)))
 
+# Create linear regression model to show relation
 model_mining_area <- lm(ndvi_1 ~ t + p + mining_land_count, data = ndvi_link)
 model_lake_area <- lm(ndvi_1 ~ t + p + mining_land_count, data = ndvi_link)
 model_outflow <- lm(ndvi_1 ~ t + p + mining_land_count, data = ndvi_link)
@@ -458,6 +505,7 @@ plot(model_outflow)
 
 ```{r}
 
+# Scatter plot for data analysis.
 ggplot(data = ndvi_link) +
   geom_point(aes(x = ndvi_max_1, y = mining_land_count, color = year)) +
   geom_point(aes(x = ndvi_max_2, y = mining_land_count, color = year)) +
@@ -471,6 +519,8 @@ ggplot(data = ndvi_link) +
   
 ```
 
+# 5.2 Mining Land to Gold Price Model
+
 ```{r}
 
 # Gold Price to mining land model
@@ -478,7 +528,7 @@ ggplot(data = ndvi_link) +
 # The goldprice.csv was created using ChatGPT 4 and therefore the data is not verifiable. 
 # However, a manual check showed that the data is similar to other gold price evolution plots. 
 
-goldprice <- read.csv("data/goldprice.csv", sep = ";") |>
+goldprice <- read.csv("data/auxilliary_data/goldprice.csv", sep = ";") |>
   rename(year = Year,
          goldprice = `Gold.Price..per.kilogram.in.USD.`) # gold price ins USD per kg
 
@@ -494,16 +544,18 @@ ggplot(count_aggregate_gold) +
   labs(x = "Mining Land Count", y = "Gold Price (per kilogram in USD)") +
   ggtitle("Scatter plot of Mining Land Count vs Gold Price")
 
-# Fit a linear regression model
-model <- lm(mining_land_count ~  goldprice, data = count_aggregate_gold)
-
-# Print the summary of the model
-summary(model)
 
 ggplot(count_aggregate_gold) +
   geom_line(aes(y = mining_land_count, x = year)) +
   geom_point(aes(y = mining_land_count, x = year)) 
 ```
 
+```{r}
 
+# Fit a linear regression model
+model <- lm(mining_land_count ~  goldprice, data = count_aggregate_gold)
+
+# Print the summary of the model
+summary(model)
+```
 
